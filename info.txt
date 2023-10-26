@@ -1,0 +1,17 @@
+my-gke-app/
+├── Dockerfile
+├── main.go
+├── go.mod
+├── go.sum
+├── config/
+│   ├── config.yaml
+├── k8s/
+│   ├── deployment.yaml
+│   ├── service.yaml
+├── scripts/
+│   ├── build.sh
+│   ├── deploy.sh
+├── sql/
+│   ├── schema.sql
+└── storage/
+    ├── storage.go
