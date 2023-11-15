@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rrm003/valut/pkg/gcp"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -58,6 +59,10 @@ type UserLoginResponse struct {
 
 func (app *AppSvc) UserRegistration(w http.ResponseWriter, r *http.Request) {
 	log.Println("user : create request received")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
 
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -129,6 +134,15 @@ func (app *AppSvc) UserRegistration(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("successfully generated custom token ", customToken)
 
+	// create user folder in cloud storage bucket
+	err = gcp.CreateFolder(app.StorageSvc, uid)
+	if err != nil {
+		log.Printf("failed to create a bucket for user %v %v", uid, err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
 	resp := UserLoginResponse{Token: customToken}
 	rawresp, err := json.Marshal(resp)
 	if err != nil {
@@ -199,6 +213,8 @@ func (app *AppSvc) UserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("token generated", customToken)
+
 	resp := UserLoginResponse{Token: customToken}
 	rawresp, err := json.Marshal(resp)
 	if err != nil {
@@ -208,7 +224,6 @@ func (app *AppSvc) UserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("token generated")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(rawresp)
