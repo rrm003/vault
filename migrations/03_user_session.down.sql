@@ -1,0 +1,3 @@
+ALTER TABLE users DROP CONSTRAINT unique_user_id;
+
+DROP TABLE IF EXISTS otp_data;
