@@ -14,9 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/pubsub"
 	_ "github.com/go-sql-driver/mysql" // Use the appropriate driver for your database
 	"github.com/gorilla/mux"
 	"github.com/rrm003/valut/pkg/db"
+	"github.com/rrm003/valut/pkg/gcp"
 	"github.com/rrm003/valut/pkg/web"
 	"google.golang.org/api/option"
 
@@ -77,14 +79,6 @@ func requireAppCheck(handler func(http.ResponseWriter, *http.Request)) func(http
 		}
 
 		fmt.Printf("token iD %+v\n", token)
-		// claims, err := decodeJWT(appCheckToken[0])
-		// if err != nil {
-		// 	fmt.Println("failed to decode jwt token", err)
-		// 	w.WriteHeader(http.StatusUnauthorized)
-		// 	w.Write([]byte("Unauthorized."))
-		// 	return
-		// }
-		// fmt.Println("token %+v", claims)
 
 		ctx := context.WithValue(r.Context(), "userid", token.UID)
 
@@ -94,10 +88,38 @@ func requireAppCheck(handler func(http.ResponseWriter, *http.Request)) func(http
 	return wrappedHandler
 }
 
+func enableCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set the CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Continue processing the request
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	log.Print("starting web services")
 
+	// os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "./valut-svc-firebase-adminsdk4.json")
+	os.Setenv("DB_HOST", "34.122.49.254")
+	os.Setenv("DB_PORT", "5432")
+	os.Setenv("DB_USER", "postgres")
+	os.Setenv("DB_PASSWORD", "loop@007")
+	os.Setenv("DB_NAME", "vault-db")
+	os.Setenv("PROJECT_ID", "vault-svc")
+
+	ctx := context.Background()
+
 	app := &web.AppSvc{}
+	app.Ctx = ctx
 
 	pgdb, err := db.StartDB()
 	if err != nil {
@@ -113,20 +135,36 @@ func main() {
 
 	//valut-svc-firebase-adminsdk4
 	opt := option.WithCredentialsFile("./valut-svc-firebase-adminsdk4.json")
-	admin, err := firebaseAdmin.NewApp(context.Background(), nil, opt)
+
+	// credentialsMetadata := os.Getenv("FIREBASE_ADMIN_CREDENTIALS")
+	// if credentialsMetadata == "" {
+	// 	log.Fatal("FIREBASE_ADMIN_CREDENTIALS environment variable not set")
+	// }
+
+	// Parse the JSON credentials from the metadata
+	// var credentials []byte
+	// if err := json.Unmarshal([]byte(credentialsMetadata), &credentials); err != nil {
+	// 	log.Fatalf("error parsing credentials: %v", err)
+	// 	return
+	// }
+
+	// Initialize the Firebase Admin SDK with the credentials
+	// opt := option.WithCredentialsJSON(credentials)
+
+	admin, err := firebaseAdmin.NewApp(ctx, nil, opt)
 	if err != nil {
 		log.Fatalf("error initializing app: %v\n", err)
 		return
 	}
 
-	appCheck, err = admin.AppCheck(context.Background())
+	appCheck, err = admin.AppCheck(ctx)
 	if err != nil {
 		log.Fatalf("error initializing app: %v\n", err)
 		return
 	}
 
 	// Create a Firebase auth client instance
-	authClient, err = admin.Auth(context.Background())
+	authClient, err = admin.Auth(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Firebase auth client: %v", err)
 		return
@@ -134,25 +172,56 @@ func main() {
 
 	app.AuthClient = authClient
 
+	storageSvc, err := gcp.GetStorageSvc()
+	if err != nil {
+		fmt.Println("file create", "failed to get storage svc", err)
+		return
+	}
+
+	app.StorageSvc = storageSvc
+
+	projectID := "valut-svc" // Replace with your Google Cloud project ID
+	topicID := "topic-otp"   // Replace with the Pub/Sub topic ID
+
+	client, err := pubsub.NewClient(ctx, projectID, option.WithCredentialsFile("./valut-svc-firebase-adminsdk4.json"))
+	if err != nil {
+		fmt.Printf("Error creating Pub/Sub client: %v\n", err)
+		return
+	}
+	defer client.Close()
+
+	topicotp := client.Topic(topicID)
+	app.TopicOTP = topicotp
+
 	r := mux.NewRouter()
+	r.Use(enableCORS)
 
 	// r.HandleFunc("/user", requireAppCheck(app.UserCreateHandler)).Methods(http.MethodPost)
 	// r.HandleFunc("/user", requireAppCheck(app.UserUpdateHandler)).Methods(http.MethodPut)
-	r.HandleFunc("/user", requireAppCheck(app.UserFetchHandler)).Methods(http.MethodGet)
+	// r.HandleFunc("/user", requireAppCheck(app.UserFetchHandler)).Methods(http.MethodGet)
 	// r.HandleFunc("/user", requireAppCheck(app.UserDeleteHandler)).Methods(http.MethodDelete)
 
-	r.HandleFunc("/register", app.UserRegistration).Methods(http.MethodPost)
-	r.HandleFunc("/login", app.UserLogin).Methods(http.MethodPost)
+	// headers := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization"})
+	// methods := handlers.AllowedMethods([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete})
+	// origins := handlers.AllowedOrigins([]string{"*"})
 
-	r.HandleFunc("/user", app.UserUpdateHandler).Methods(http.MethodPut)
-	// r.HandleFunc("/user", app.UserFetchHandler).Methods(http.MethodGet)
-	r.HandleFunc("/user", app.UserDeleteHandler).Methods(http.MethodDelete)
+	r.HandleFunc("/register", app.UserRegistration).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/login", app.UserLogin).Methods(http.MethodPost, http.MethodOptions)
 
-	r.HandleFunc("/file", app.FileListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/file", app.FileCreateHandler).Methods(http.MethodPost)
-	r.HandleFunc("/file", app.UserUpdateHandler).Methods(http.MethodPut)
-	r.HandleFunc("/file", app.UserFetchHandler).Methods(http.MethodGet)
-	r.HandleFunc("/file", app.UserDeleteHandler).Methods(http.MethodDelete)
+	r.HandleFunc("/user", requireAppCheck(app.UserUpdateHandler)).Methods(http.MethodPut, http.MethodOptions)
+	r.HandleFunc("/user", requireAppCheck(app.UserFetchHandler)).Methods(http.MethodGet, http.MethodOptions)
+	r.HandleFunc("/user", requireAppCheck(app.UserDeleteHandler)).Methods(http.MethodDelete, http.MethodOptions)
+
+	r.HandleFunc("/list", requireAppCheck(app.FileListHandler)).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/file/upload", requireAppCheck(app.FileCreateHandler)).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/file", requireAppCheck(app.UserUpdateHandler)).Methods(http.MethodPut, http.MethodOptions)
+	r.HandleFunc("/file/otp", requireAppCheck(app.FetchFileOTPHandler)).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/file", requireAppCheck(app.FetchFileHandler)).Methods(http.MethodPost, http.MethodOptions)
+	// r.HandleFunc("/file", app.FetchFileHandler).Methods(http.MethodPost, http.MethodOptions)
+
+	r.HandleFunc("/file", requireAppCheck(app.FileDeleteHandler)).Methods(http.MethodDelete, http.MethodOptions)
+
+	r.HandleFunc("/folder", requireAppCheck(app.CreateFolderHandler)).Methods(http.MethodPost, http.MethodOptions)
 
 	r.Use(loggingMiddleware)
 
@@ -187,3 +256,5 @@ func main() {
 	log.Println("shutting down")
 	os.Exit(0)
 }
+
+// kubectl create secret generic svc-credentials-secret --from-file=svc-credentials.json=./valut-svc-firebase-adminsdk4.json
