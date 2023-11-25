@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"time"
 
+	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"github.com/rrm003/valut/pkg/gcp"
+	"google.golang.org/api/iterator"
 )
 
 type FetchFileReq struct {
@@ -245,7 +247,7 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// userUID := "8bd67aed-6ec5-48a4-a6b6-73e794ca12d6"
-
+	rawId := userUID
 	userUID = fmt.Sprintf("%s/", userUID)
 
 	fmt.Println("fetch file request", r)
@@ -271,10 +273,10 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// validate user file otp combination
 	ufotp := &UserFileOTP{}
-	_, err = app.DB.Query(ufotp, "select * from user_file_otp where user_id = ? and file_path = ? and otp = ? and expires_at>=now()", userUID, body.Path, body.OTP)
+	_, err = app.DB.Query(ufotp, "select * from user_file_otp where user_id = ? and file_path = ? and otp = ? and expires_at>=now()", rawId, body.Path, body.OTP)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			fmt.Printf("no record found for combination of user = %s file %s otp %s \n", userUID, body.Path, body.OTP)
+			fmt.Printf("no record found for combination of user = %s file %s otp %s \n", rawId, body.Path, body.OTP)
 			w.WriteHeader(http.StatusUnauthorized)
 
 			return
@@ -301,8 +303,44 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	opts := &storage.SignedURLOptions{
+		Scheme:  storage.SigningSchemeV4,
+		Method:  "GET",
+		Expires: time.Now().Add(5 * time.Minute),
+		QueryParameters: map[string][]string{
+			"generation": {fmt.Sprintf("%d", 1700498282471719)},
+		},
+	}
+
+	u, err := app.StorageSvc.SignedURL(body.Path, opts)
+	if err != nil {
+		fmt.Printf("Bucket(%q).SignedURL: %w \n", "valut-svc", err)
+	}
+
+	fmt.Println("signed url", u)
+
 	resp := FetchFileResp{
-		URL: "https://storage.googleapis.com/valut-bucket/" + body.Path,
+		URL: u,
+	}
+
+	q := &storage.Query{
+		Prefix:   body.Path,
+		Versions: true,
+	}
+
+	// List all versions of the specified object
+	it := app.StorageSvc.Objects(context.Background(), q)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			fmt.Printf("Error iterating through object versions: %v\n", err)
+
+			return
+		}
+		fmt.Printf("Object version: %v, Size: %v, Created: %v\n", attrs.Generation, attrs.Size, attrs.Created)
 	}
 
 	rawResp, err := json.Marshal(resp)

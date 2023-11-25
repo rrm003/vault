@@ -39,9 +39,12 @@ func StartDB() (*pg.DB, error) {
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_NAME")
 
+	conectionURL := fmt.Sprintf("%s:%s", dbHost, dbPort)
+	fmt.Println("db connection url ", conectionURL)
+
 	// Construct the connection options
 	opts = &pg.Options{
-		Addr:     fmt.Sprintf("%s:%s", dbHost, dbPort),
+		Addr:     conectionURL,
 		User:     dbUser,
 		Password: dbPassword,
 		Database: dbName,
