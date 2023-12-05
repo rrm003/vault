@@ -24,8 +24,15 @@ type FetchFileReq struct {
 	OTP  string `json:"otp"`
 }
 
+type Version struct {
+	ID        int64     `json:"id"`
+	Size      float64   `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type FetchFileResp struct {
-	URL string `json:"url"`
+	URL      string    `json:"url"`
+	Versions []Version `json:"versions"`
 }
 
 type DeleteFileReq struct {
@@ -40,10 +47,10 @@ type CreateFolderReq struct {
 type UserFileOTP struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
-	Path      string    `json:"file_path"`
+	FilePath  string    `json:"file_path"`
 	OTP       string    `json:"otp"`
 	CreatedAt time.Time `json:"created_at"`
-	ExpiryAt  time.Time `json:"expires_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // Define the character set for the alphanumeric code
@@ -328,6 +335,7 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		Versions: true,
 	}
 
+	versions := make([]Version, 0)
 	// List all versions of the specified object
 	it := app.StorageSvc.Objects(context.Background(), q)
 	for {
@@ -337,11 +345,14 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			fmt.Printf("Error iterating through object versions: %v\n", err)
-
 			return
 		}
+
+		versions = append(versions, Version{ID: attrs.Generation, Size: float64(attrs.Size), CreatedAt: attrs.Created})
 		fmt.Printf("Object version: %v, Size: %v, Created: %v\n", attrs.Generation, attrs.Size, attrs.Created)
 	}
+
+	resp.Versions = versions
 
 	rawResp, err := json.Marshal(resp)
 	if err != nil {
