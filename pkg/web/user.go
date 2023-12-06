@@ -28,10 +28,10 @@ type User struct {
 }
 
 type UpdateReq struct {
-	Name           string
-	PrimaryEmail   string
-	SecondaryEmail string
-	PhotoURL       string
+	Name           string `json:"name"`
+	PrimaryEmail   string `json:"primary_email"`
+	SecondaryEmail string `json:"secondary_email"`
+	PhotoURL       string `json:"photo_url"`
 }
 
 type UpdateResp struct {
@@ -232,10 +232,57 @@ func (app *AppSvc) UserLogin(w http.ResponseWriter, r *http.Request) {
 func (app *AppSvc) UserUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("user : update request received")
 
+	userUID, ok := r.Context().Value("userid").(string)
+	if !ok {
+		// Handle the case where userUID is not available in the context
+		http.Error(w, "User ID not found", http.StatusUnauthorized)
+		return
+	}
+
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		fmt.Println("error reading request body", err)
 		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	reqData := UpdateReq{}
+	err = json.Unmarshal(data, &reqData)
+	if err != nil {
+		fmt.Println("error reading request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	fmt.Println(reqData)
+
+	// profile_url
+	// secondary_email
+	// name
+
+	query := ""
+	if reqData.Name != "" {
+		query = fmt.Sprintf("name='%s',", reqData.Name)
+	}
+
+	if reqData.PhotoURL != "" {
+		query += fmt.Sprintf("photo_url='%s',", reqData.PhotoURL)
+	}
+
+	if reqData.SecondaryEmail != "" {
+		query += fmt.Sprintf("secondary_email='%s'", reqData.SecondaryEmail)
+	}
+
+	query += fmt.Sprintf(" where id ='%s';", userUID)
+
+	fmt.Println("query: ", query)
+
+	// Create a new user in the database
+	if _, err = app.DB.Exec(fmt.Sprintf("update users set %s", query)); err != nil {
+		log.Printf("failed to update user into database: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return
 	}
