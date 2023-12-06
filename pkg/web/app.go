@@ -11,10 +11,12 @@ import (
 )
 
 type AppSvc struct {
-	Ctx        context.Context
-	DB         *pg.DB
-	Logger     *log.Logger
-	AuthClient *auth.Client
-	StorageSvc *storage.BucketHandle
-	TopicOTP   *pubsub.Topic
+	Ctx               context.Context
+	DB                *pg.DB
+	Logger            *log.Logger
+	AuthClient        *auth.Client
+	StorageSvc        *storage.BucketHandle
+	ProfileStorageSvc *storage.BucketHandle
+
+	TopicOTP *pubsub.Topic
 }

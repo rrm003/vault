@@ -42,6 +42,21 @@ func GetStorageSvc() (*storage.BucketHandle, error) {
 	return bucket, nil
 }
 
+func GetProfileStorageSvc() (*storage.BucketHandle, error) {
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Printf("Failed to create client: %v", err)
+
+		return nil, err
+	}
+
+	bucketName = "vault-profile"
+	bucket := client.Bucket(bucketName)
+
+	return bucket, nil
+}
+
 func ListObjects(bucket *storage.BucketHandle, folderPath string) ([]*FileList, error) {
 	fmt.Println("Objects in the bucket:", folderPath)
 	query := &storage.Query{Prefix: folderPath + "/", Delimiter: "/"}

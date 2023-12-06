@@ -456,3 +456,47 @@ func (app *AppSvc) CreateFolderHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("folder created")
 }
+
+func (app *AppSvc) UploadProfile(w http.ResponseWriter, r *http.Request) {
+	userUID, ok := r.Context().Value("userid").(string)
+	if !ok {
+		// Handle the case where userUID is not available in the context
+		http.Error(w, "User ID not found", http.StatusUnauthorized)
+		return
+	}
+
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		fmt.Println("file create", "failed to read file", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	fmt.Println(handler.Filename)
+	handler.Filename = userUID
+
+	defer file.Close()
+
+	publicURL := fmt.Sprintf("https://storage.googleapis.com/vault-profile/%s", userUID)
+	err = gcp.CreateFile(app.ProfileStorageSvc, "", handler.Filename, file)
+	if err != nil {
+		fmt.Println("file create", "failed to store file in bucket", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	resp := FetchFileResp{
+		URL: publicURL,
+	}
+
+	rawResp, err := json.Marshal(resp)
+	if err != nil {
+		fmt.Println("error marshalling resp", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(rawResp)
+}
