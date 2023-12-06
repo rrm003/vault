@@ -20,8 +20,9 @@ import (
 )
 
 type FetchFileReq struct {
-	Path string `json:"path"`
-	OTP  string `json:"otp"`
+	Path    string `json:"path"`
+	OTP     string `json:"otp"`
+	Version string `json:"version,omitempty"`
 }
 
 type Version struct {
@@ -314,9 +315,12 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		Scheme:  storage.SigningSchemeV4,
 		Method:  "GET",
 		Expires: time.Now().Add(5 * time.Minute),
-		QueryParameters: map[string][]string{
-			"generation": {fmt.Sprintf("%d", 1700498282471719)},
-		},
+	}
+
+	if body.Version != "" {
+		opts.QueryParameters = map[string][]string{
+			"generation": {body.Version},
+		}
 	}
 
 	u, err := app.StorageSvc.SignedURL(body.Path, opts)
