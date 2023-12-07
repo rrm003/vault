@@ -82,6 +82,17 @@ func requireAppCheck(handler func(http.ResponseWriter, *http.Request)) func(http
 
 		ctx := context.WithValue(r.Context(), "userid", token.UID)
 
+		fmt.Println("token ID", token.UID)
+
+		e := gcp.AuditEvent{
+			UserID:    token.UID,
+			Action:    r.URL.Path,
+			IP:        r.RemoteAddr,
+			Browser:   r.UserAgent(),
+			Timestamp: time.Now(),
+		}
+
+		web.SendAudit(e)
 		handler(w, r.WithContext(ctx))
 	}
 
@@ -109,7 +120,7 @@ func main() {
 	log.Print("starting web services")
 
 	// os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "./valut-svc-firebase-adminsdk4.json")
-	os.Setenv("DB_HOST", "34.122.49.254")
+	os.Setenv("DB_HOST", "34.70.210.195")
 	os.Setenv("DB_PORT", "5432")
 	os.Setenv("DB_USER", "postgres")
 	os.Setenv("DB_PASSWORD", "loop@007")
@@ -135,21 +146,6 @@ func main() {
 
 	//valut-svc-firebase-adminsdk4
 	opt := option.WithCredentialsFile("./valut-svc-firebase-adminsdk4.json")
-
-	// credentialsMetadata := os.Getenv("FIREBASE_ADMIN_CREDENTIALS")
-	// if credentialsMetadata == "" {
-	// 	log.Fatal("FIREBASE_ADMIN_CREDENTIALS environment variable not set")
-	// }
-
-	// Parse the JSON credentials from the metadata
-	// var credentials []byte
-	// if err := json.Unmarshal([]byte(credentialsMetadata), &credentials); err != nil {
-	// 	log.Fatalf("error parsing credentials: %v", err)
-	// 	return
-	// }
-
-	// Initialize the Firebase Admin SDK with the credentials
-	// opt := option.WithCredentialsJSON(credentials)
 
 	admin, err := firebaseAdmin.NewApp(ctx, nil, opt)
 	if err != nil {
@@ -178,7 +174,14 @@ func main() {
 		return
 	}
 
+	profileStorageSvc, err := gcp.GetProfileStorageSvc()
+	if err != nil {
+		fmt.Println("file create", "failed to get storage svc", err)
+		return
+	}
+
 	app.StorageSvc = storageSvc
+	app.ProfileStorageSvc = profileStorageSvc
 
 	projectID := "valut-svc" // Replace with your Google Cloud project ID
 	topicID := "topic-otp"   // Replace with the Pub/Sub topic ID
@@ -195,15 +198,6 @@ func main() {
 
 	r := mux.NewRouter()
 	r.Use(enableCORS)
-
-	// r.HandleFunc("/user", requireAppCheck(app.UserCreateHandler)).Methods(http.MethodPost)
-	// r.HandleFunc("/user", requireAppCheck(app.UserUpdateHandler)).Methods(http.MethodPut)
-	// r.HandleFunc("/user", requireAppCheck(app.UserFetchHandler)).Methods(http.MethodGet)
-	// r.HandleFunc("/user", requireAppCheck(app.UserDeleteHandler)).Methods(http.MethodDelete)
-
-	// headers := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization"})
-	// methods := handlers.AllowedMethods([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete})
-	// origins := handlers.AllowedOrigins([]string{"*"})
 
 	r.HandleFunc("/register", app.UserRegistration).Methods(http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/login", app.UserLogin).Methods(http.MethodPost, http.MethodOptions)
@@ -222,6 +216,8 @@ func main() {
 	r.HandleFunc("/file", requireAppCheck(app.FileDeleteHandler)).Methods(http.MethodDelete, http.MethodOptions)
 
 	r.HandleFunc("/folder", requireAppCheck(app.CreateFolderHandler)).Methods(http.MethodPost, http.MethodOptions)
+
+	r.HandleFunc("/profile/upload", requireAppCheck(app.UploadProfile)).Methods(http.MethodPost, http.MethodOptions)
 
 	r.Use(loggingMiddleware)
 

@@ -18,5 +18,6 @@ type AppSvc struct {
 	StorageSvc        *storage.BucketHandle
 	ProfileStorageSvc *storage.BucketHandle
 
-	TopicOTP *pubsub.Topic
+	TopicOTP   *pubsub.Topic
+	TopicAudit *pubsub.Topic
 }
