@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS user_file_otp (
     file_path TEXT NOT NULL,
     otp TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '30 seconds'),
+    expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '45 seconds'),
     PRIMARY KEY (id),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
