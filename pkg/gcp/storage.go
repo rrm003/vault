@@ -36,7 +36,8 @@ func GetStorageSvc() (*storage.BucketHandle, error) {
 		return nil, err
 	}
 
-	bucketName = "valut-bucket"
+	// bucketName = "valut-bucket"
+	bucketName = "valut-bucket-1"
 	bucket := client.Bucket(bucketName)
 
 	return bucket, nil
@@ -51,7 +52,8 @@ func GetProfileStorageSvc() (*storage.BucketHandle, error) {
 		return nil, err
 	}
 
-	bucketName = "vault-profile"
+	// bucketName = "vault-profile"
+	bucketName = "vault-profile-1"
 	bucket := client.Bucket(bucketName)
 
 	return bucket, nil
