@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -55,6 +57,24 @@ type UserLogin struct {
 
 type UserLoginResponse struct {
 	Token string `json:"token"`
+}
+
+type ResetPassReq struct {
+	Email string `json:"primary_email"`
+}
+
+type ResetPassResp struct {
+	OTP string `json:"otp"`
+}
+
+type ResetPassOTPReq struct {
+	Email string `json:"primary_email"`
+	OTP   string `json:"otp"`
+}
+
+type ResetPassUpdateReq struct {
+	Email    string `json:"primary_email"`
+	Password string `json:"password"`
 }
 
 func (app *AppSvc) UserRegistration(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +257,219 @@ func (app *AppSvc) UserLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(rawresp)
+}
+
+func (app *AppSvc) ResetPass(w http.ResponseWriter, r *http.Request) {
+	log.Println("user : reset pass received")
+
+	reqBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println("error reading request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	// check user is already present
+	user := &ResetPassReq{}
+	err = json.Unmarshal(reqBody, user)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	fmt.Printf("user : after marshal : %+v\n", user)
+
+	dbUser := &User{}
+	_, err = app.DB.Query(dbUser, "select * from users where primary_email = ?", user.Email)
+	if err != nil {
+		fmt.Println("error reading db", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("no record found for combination of user = %s file %s", dbUser.ID, "userlogin")
+			http.Error(w, "email not registered", http.StatusNotFound)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	opt := generateRandomCode()
+	// create user file otp combination
+	_, err = app.DB.Exec("insert into user_file_otp(user_id, file_path, otp, expires_at)  values(?, ?, ?, ?)", dbUser.ID, "userlogin", opt, time.Now().Add(1*time.Minute))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("no record found for combination of user = %s file %s otp %s \n", dbUser.ID, "userlogin", opt)
+			w.WriteHeader(http.StatusUnauthorized)
+
+			return
+		}
+
+		fmt.Println("error reading db", err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	e := &gcp.Event{
+		Name:  "File access OTP",
+		Email: dbUser.PrimaryEmail,
+		Msg:   fmt.Sprintf("OTP %s for account verifivation %s", opt, user.Email),
+	}
+
+	// send otp to email of user
+	err = gcp.PublishMessage(app.Ctx, app.TopicOTP, e)
+	if err != nil {
+		fmt.Println("failed to publish msg", err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	resp := ResetPassResp{OTP: opt}
+	rawResp, err := json.Marshal(resp)
+	if err != nil {
+		fmt.Println("failed to marshal response", err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, string(rawResp))
+}
+
+func (app *AppSvc) ResetPassOTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("user : reset pass received")
+
+	reqBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println("error reading request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	// check user is already present
+	body := &ResetPassOTPReq{}
+	err = json.Unmarshal(reqBody, body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	fmt.Printf("user : after marshal : %+v\n", body)
+
+	dbUser := &User{}
+	_, err = app.DB.Query(dbUser, "select * from users where primary_email = ?", body.Email)
+	if err != nil {
+		fmt.Println("error reading db", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("no record found for combination of user = %s file %s", dbUser.ID, "userlogin")
+			http.Error(w, "email not registered", http.StatusNotFound)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	ufotp := &UserFileOTP{}
+	_, err = app.DB.Query(ufotp, "select * from user_file_otp where user_id = ? and file_path = ? and otp = ? and expires_at>=now()", dbUser.ID, "userlogin", body.OTP)
+	if err != nil {
+		fmt.Println("error checking the file otp ", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("1 no record found for combination of user = %s file %s otp %s \n", dbUser.ID, "userlogin", body.OTP)
+			http.Error(w, "Invalid OTP", http.StatusUnauthorized)
+
+			return
+		}
+
+		fmt.Println("error reading db", err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	fmt.Printf("found db record : %+v \n", ufotp)
+
+	if ufotp.OTP != body.OTP {
+		fmt.Printf("3 no record found for combination of user = %s file %s otp %s \n", dbUser.ID, "userlogin", body.OTP)
+		http.Error(w, "Invalid OTP", http.StatusUnauthorized)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, "OTP verified")
+}
+
+func (app *AppSvc) ResetPassUpdate(w http.ResponseWriter, r *http.Request) {
+	log.Println("user : reset pass received")
+
+	reqBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println("error reading request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	// check user is already present
+	user := &ResetPassUpdateReq{}
+	err = json.Unmarshal(reqBody, user)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+
+	fmt.Printf("user : after marshal : %+v\n", user)
+
+	dbUser := &User{}
+	_, err = app.DB.Query(dbUser, "select * from users where primary_email = ?", user.Email)
+	if err != nil {
+		fmt.Println("error reading db", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("no record found for combination of user = %s file %s", dbUser.ID, "userlogin")
+			http.Error(w, "email not registered", http.StatusNotFound)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Generate a hash of the user's password using bcrypt
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("failed to hash password: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println("hashed password : ", string(hashedPassword))
+
+	// Create a new user in the database
+	if _, err = app.DB.Exec("Update users set password =? where primary_email = ?", string(hashedPassword), user.Email); err != nil {
+		log.Printf("failed to update user into database: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, "password updated")
 }
 
 func (app *AppSvc) UserUpdateHandler(w http.ResponseWriter, r *http.Request) {

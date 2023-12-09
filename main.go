@@ -201,6 +201,9 @@ func main() {
 
 	r.HandleFunc("/register", app.UserRegistration).Methods(http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/login", app.UserLogin).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/resetpass", app.ResetPass).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/resetpass/otp", app.ResetPassOTP).Methods(http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/resetpass/update", app.ResetPass).Methods(http.MethodPost, http.MethodOptions)
 
 	r.HandleFunc("/user", requireAppCheck(app.UserUpdateHandler)).Methods(http.MethodPut, http.MethodOptions)
 	r.HandleFunc("/user", requireAppCheck(app.UserFetchHandler)).Methods(http.MethodGet, http.MethodOptions)
