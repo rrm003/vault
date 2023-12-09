@@ -219,6 +219,8 @@ func main() {
 
 	r.HandleFunc("/profile/upload", requireAppCheck(app.UploadProfile)).Methods(http.MethodPost, http.MethodOptions)
 
+	r.HandleFunc("/terminate", requireAppCheck(app.Terminate)).Methods(http.MethodDelete, http.MethodOptions)
+
 	r.Use(loggingMiddleware)
 
 	srv := &http.Server{

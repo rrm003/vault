@@ -202,7 +202,7 @@ func (app *AppSvc) FetchFileOTPHandler(w http.ResponseWriter, r *http.Request) {
 
 	opt := generateRandomCode()
 	// create user file otp combination
-	_, err = app.DB.Exec("insert into user_file_otp(user_id, file_path, otp, expires_at)  values(?, ?, ?, ?)", id, body.Path, opt, time.Now().Add(35*time.Second))
+	_, err = app.DB.Exec("insert into user_file_otp(user_id, file_path, otp, expires_at)  values(?, ?, ?, ?)", id, body.Path, opt, time.Now().Add(45*time.Second))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			fmt.Printf("no record found for combination of user = %s file %s otp %s \n", userUID, body.Path, body.OTP)
@@ -229,9 +229,16 @@ func (app *AppSvc) FetchFileOTPHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("user :", user)
 
+	if user.SecondaryEmail == "" {
+		fmt.Println("error SecondaryEmail not setup")
+		http.Error(w, "SecondaryEmail not setup", http.StatusBadRequest)
+
+		return
+	}
+
 	e := &gcp.Event{
 		Name:  "File access OTP",
-		Email: user.PrimaryEmail,
+		Email: user.SecondaryEmail,
 		Msg:   fmt.Sprintf("OTP %s for file %s", opt, body.Path),
 	}
 
@@ -283,9 +290,10 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 	ufotp := &UserFileOTP{}
 	_, err = app.DB.Query(ufotp, "select * from user_file_otp where user_id = ? and file_path = ? and otp = ? and expires_at>=now()", rawId, body.Path, body.OTP)
 	if err != nil {
+		fmt.Println("error checking the file otp ", err)
 		if errors.Is(err, sql.ErrNoRows) {
-			fmt.Printf("no record found for combination of user = %s file %s otp %s \n", rawId, body.Path, body.OTP)
-			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Printf("1 no record found for combination of user = %s file %s otp %s \n", rawId, body.Path, body.OTP)
+			http.Error(w, "Invalid OTP", http.StatusUnauthorized)
 
 			return
 		}
@@ -296,6 +304,20 @@ func (app *AppSvc) FetchFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("found db record : %+v \n", ufotp)
+	if ufotp == nil {
+		fmt.Printf("2 no record found for combination of user = %s file %s otp %s \n", rawId, body.Path, body.OTP)
+		http.Error(w, "Invalid OTP", http.StatusUnauthorized)
+
+		return
+	}
+
+	if ufotp.OTP != body.OTP {
+		fmt.Printf("3 no record found for combination of user = %s file %s otp %s \n", rawId, body.Path, body.OTP)
+		http.Error(w, "User ID not found", http.StatusUnauthorized)
+
+		return
+	}
 	// path, err := gcp.FetchFile(app.StorageSvc, body.Path)
 	// if err != nil {
 	// 	fmt.Println("error fetching file", err)
@@ -477,7 +499,7 @@ func (app *AppSvc) UploadProfile(w http.ResponseWriter, r *http.Request) {
 
 	defer file.Close()
 
-	publicURL := fmt.Sprintf("https://storage.googleapis.com/vault-profile/%s", userUID)
+	publicURL := fmt.Sprintf("https://storage.googleapis.com/vault-profile-1/%s", userUID)
 	err = gcp.CreateFile(app.ProfileStorageSvc, "", handler.Filename, file)
 	if err != nil {
 		fmt.Println("file create", "failed to store file in bucket", err)
@@ -499,4 +521,43 @@ func (app *AppSvc) UploadProfile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(rawResp)
+}
+
+func (app *AppSvc) Terminate(w http.ResponseWriter, r *http.Request) {
+	userUID, ok := r.Context().Value("userid").(string)
+	if !ok {
+		// Handle the case where userUID is not available in the context
+		http.Error(w, "User ID not found", http.StatusUnauthorized)
+		return
+	}
+
+	err := gcp.DeleteFolder(app.StorageSvc, userUID)
+	if err != nil {
+		fmt.Println("failed to delete folder :", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	_, err = app.DB.Exec("Delete from logs where user_id = ?;", userUID)
+	if err != nil {
+		fmt.Println("failed to delete user_file_otp record :", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	_, err = app.DB.Exec("Delete from user_file_otp where user_id = ?;", userUID)
+	if err != nil {
+		fmt.Println("failed to delete user_file_otp record :", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	_, err = app.DB.Exec("Delete from users where id = ?;", userUID)
+	if err != nil {
+		fmt.Println("failed to delete user record :", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
