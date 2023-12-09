@@ -189,6 +189,16 @@ func (app *AppSvc) UserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	e := gcp.AuditEvent{
+		UserID:    dbUser.ID.String(),
+		Action:    r.URL.Path,
+		IP:        r.RemoteAddr,
+		Browser:   r.UserAgent(),
+		Timestamp: time.Now(),
+	}
+
+	SendAudit(e)
+
 	fmt.Println("hashed password ", dbUser.Password)
 
 	if err := bcrypt.CompareHashAndPassword([]byte(dbUser.Password), []byte(user.Password)); err != nil {
